@@ -220,7 +220,7 @@ node node_modules/dsh-github-sync/test/verify.mjs
 | `GitHub rejected the request (HTTP 401)` | The token is expired or wrong; issue a new one |
 | `HTTP 403` with a permission hint | The next step names the exact permission GitHub wanted — for a fine-grained token, usually `administration=write` or `repository_creation=write` |
 | `HTTP 404` on a repository you own | The token cannot see it — a fine-grained token needs this repository plus **Contents** and **Administration** write |
-| `TLS_UNTRUSTED` | A TLS-inspecting proxy or GitHub accelerator is intercepting `api.github.com`. Windows trusts its root certificate, Node does not: point `NODE_EXTRA_CA_CERTS` at that root in PEM form and restart DSH |
+| `TLS_UNTRUSTED` | A TLS-inspecting proxy or GitHub accelerator is intercepting `api.github.com`. Windows trusts its root certificate, Node does not: point `NODE_EXTRA_CA_CERTS` at that root in PEM form and restart DSH — see [Behind a GitHub accelerator](#behind-a-github-accelerator) |
 | `git push failed … non-fast-forward` | Retry, or pass `force` to replace the remote branch |
 | `REBASE_CONFLICT` | Resolve it by hand in the workspace, or re-run with `force` |
 | `The git executable was not found on PATH` | Install Git and restart DSH so the new `PATH` is picked up |
@@ -228,28 +228,41 @@ node node_modules/dsh-github-sync/test/verify.mjs
 
 ### Behind a GitHub accelerator
 
-A TLS-inspecting accelerator (Watt Toolkit / Steam++, FastGithub, dev-sidecar) serves GitHub through a local proxy and re-signs the connection with its own root certificate. Windows trusts that root; Node and git do not, so every call fails with `TLS_UNTRUSTED` even though the network is fine.
+A TLS-inspecting accelerator (Watt Toolkit / Steam++, FastGithub, dev-sidecar) serves GitHub through a local proxy and re-signs the connection with its own root certificate. Windows trusts that root; **Node does not**, because Node ships its own CA list instead of reading the OS store. Every plugin call then fails with `TLS_UNTRUSTED` even though the network is fine.
 
-Export the accelerator's root certificate and point both runtimes at it:
+Export the accelerator's root and point Node at it:
 
-```bash
-# 1. Export the root certificate (Windows, PowerShell)
+```powershell
+# 1. Export the accelerator's root certificate as PEM
 $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'SteamTools' } | Select-Object -First 1
-$der  = $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)
-$b64  = [Convert]::ToBase64String($der)
+$b64  = [Convert]::ToBase64String($cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert))
 $pem  = "-----BEGIN CERTIFICATE-----`n" +
         (($b64 -split '(.{1,64})' | Where-Object { $_ }) -join "`n") +
         "`n-----END CERTIFICATE-----`n"
-[IO.File]::WriteAllText("$env:TEMP\accelerator-ca.pem", $pem)
+$path = "$env:LOCALAPPDATA\dsh-github-sync\certs\accelerator-root.pem"
+New-Item -ItemType Directory -Path (Split-Path $path) -Force | Out-Null
+[IO.File]::WriteAllText($path, $pem)
 
-# 2. Let Node trust it (the plugin and github_configure)
-setx NODE_EXTRA_CA_CERTS "%TEMP%\accelerator-ca.pem"
-
-# 3. Let git trust it (git owns a separate CA bundle)
-git config --global http.sslCAInfo "%TEMP%\accelerator-ca.pem"
+# 2. Let Node trust it. NODE_EXTRA_CA_CERTS is additive, so the built-in CAs survive.
+setx NODE_EXTRA_CA_CERTS $path
 ```
 
-Restart DSH after step 2 so the host process picks up the variable.
+Restart DSH afterwards so the host process inherits the variable.
+
+**git usually needs nothing.** Git for Windows defaults to the `schannel` backend, which validates against the Windows certificate store — so once Windows trusts the accelerator root, git already works, and `http.sslCAInfo` is silently ignored:
+
+```bash
+git config --show-origin --get http.sslBackend
+# schannel   -> the Windows store is in charge; no git-side CA configuration needed
+```
+
+Only if git reports an OpenSSL backend (the default on macOS and Linux, and on Windows builds configured that way) does it need its own bundle — and point it at the *combined* bundle, since replacing the default would break every host that is not intercepted:
+
+```bash
+cat "$(git config --get http.sslCABundle 2>/dev/null || echo /etc/ssl/certs/ca-certificates.crt)" \
+    ~/.local/share/dsh-github-sync/certs/accelerator-root.pem > ~/.local/share/dsh-github-sync/certs/combined.crt
+git config --global http.sslCAInfo ~/.local/share/dsh-github-sync/certs/combined.crt
+```
 
 ## License
 
