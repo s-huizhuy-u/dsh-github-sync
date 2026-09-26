@@ -561,6 +561,54 @@ await test('a pending harness upgrade reaches github_status', async () => {
   }
 })
 
+await test('a TLS trust failure is reported as its own condition', async () => {
+  const { ctx, tools } = fakeContext()
+  await apply(ctx)
+  const original = globalThis.fetch
+  /* This is the shape Node throws behind a TLS-inspecting proxy: the
+     interception certificate is trusted by the OS but not by Node's CA list. */
+  globalThis.fetch = async () => {
+    const failure = new TypeError('fetch failed')
+    failure.cause = Object.assign(new Error('unable to verify the first certificate'), {
+      code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+    })
+    throw failure
+  }
+  try {
+    const out = await tools.get('github_configure').execute({ token: 'ghp_example' }, {})
+    assert.equal(out.ok, false)
+    assert.equal(out.code, 'TLS_UNTRUSTED')
+    assert.match(out.next_step, /NODE_EXTRA_CA_CERTS/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+await test('a rejected call surfaces the permission GitHub asked for', async () => {
+  const { ctx, tools } = fakeContext()
+  await apply(ctx)
+  const original = globalThis.fetch
+  globalThis.fetch = async () => new Response(
+    JSON.stringify({ message: 'Resource not accessible by personal access token' }),
+    {
+      status: 403,
+      headers: {
+        'content-type': 'application/json',
+        'x-accepted-github-permissions': 'administration=write; repository_creation=write',
+      },
+    },
+  )
+  try {
+    const out = await tools.get('github_configure').execute({ token: 'github_pat_example' }, {})
+    assert.equal(out.ok, false)
+    assert.equal(out.code, 'FORBIDDEN')
+    assert.match(out.next_step, /administration=write/)
+    assert.match(out.next_step, /repository_creation=write/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 for (const directory of cleanups) await rm(directory, { recursive: true, force: true })
 
 console.log(`\n${passed} passed, ${failed} failed\n`)

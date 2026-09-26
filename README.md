@@ -179,7 +179,7 @@ If DSH will not open at all, the failure is usually the plugin tree; start in Sa
 
 ## Verification
 
-`test/verify.mjs` runs 31 checks offline: the REST layer is served by a stub `fetch`, and the git layer talks to a real bare repository on local disk. That combination exercises the ordering that actually breaks in production — create, then init, then commit, then push — while staying hermetic.
+`test/verify.mjs` runs 33 checks offline: the REST layer is served by a stub `fetch`, and the git layer talks to a real bare repository on local disk. That combination exercises the ordering that actually breaks in production — create, then init, then commit, then push — while staying hermetic.
 
 ```bash
 node test/verify.mjs
@@ -200,9 +200,10 @@ tools (stubbed GitHub API)
   ok   github_sync reports NOT_CONFIGURED without touching the network
   ok   github_sync creates the repository, commits, and reports the outcome
   ok   a second sync with no changes reuses HEAD instead of failing
-  ok   every tool result satisfies its own declared output schema
+  ok   a TLS trust failure is reported as its own condition
+  ok   a rejected call surfaces the permission GitHub asked for
 
-31 passed, 0 failed
+33 passed, 0 failed
 ```
 
 Run it from an installed copy so `@deepseek-ai/*` resolves:
@@ -217,12 +218,38 @@ node node_modules/dsh-github-sync/test/verify.mjs
 |---|---|
 | `No GitHub token is configured` | Set `GITHUB_TOKEN`, or store one with `github_configure`, then restart DSH |
 | `GitHub rejected the request (HTTP 401)` | The token is expired or wrong; issue a new one |
-| `HTTP 403` with a scope hint | A classic token without `repo`; reissue it with that scope |
+| `HTTP 403` with a permission hint | The next step names the exact permission GitHub wanted — for a fine-grained token, usually `administration=write` or `repository_creation=write` |
 | `HTTP 404` on a repository you own | The token cannot see it — a fine-grained token needs this repository plus **Contents** and **Administration** write |
+| `TLS_UNTRUSTED` | A TLS-inspecting proxy or GitHub accelerator is intercepting `api.github.com`. Windows trusts its root certificate, Node does not: point `NODE_EXTRA_CA_CERTS` at that root in PEM form and restart DSH |
 | `git push failed … non-fast-forward` | Retry, or pass `force` to replace the remote branch |
 | `REBASE_CONFLICT` | Resolve it by hand in the workspace, or re-run with `force` |
 | `The git executable was not found on PATH` | Install Git and restart DSH so the new `PATH` is picked up |
 | The plugin never appears | Confirm the loader row is in `<profile>/cordis.patch.yml` and the package is under `<profile>/node_modules/`, then restart DSH |
+
+### Behind a GitHub accelerator
+
+A TLS-inspecting accelerator (Watt Toolkit / Steam++, FastGithub, dev-sidecar) serves GitHub through a local proxy and re-signs the connection with its own root certificate. Windows trusts that root; Node and git do not, so every call fails with `TLS_UNTRUSTED` even though the network is fine.
+
+Export the accelerator's root certificate and point both runtimes at it:
+
+```bash
+# 1. Export the root certificate (Windows, PowerShell)
+$cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'SteamTools' } | Select-Object -First 1
+$der  = $cert.Export([Security.Cryptography.X509Certificates.X509ContentType]::Cert)
+$b64  = [Convert]::ToBase64String($der)
+$pem  = "-----BEGIN CERTIFICATE-----`n" +
+        (($b64 -split '(.{1,64})' | Where-Object { $_ }) -join "`n") +
+        "`n-----END CERTIFICATE-----`n"
+[IO.File]::WriteAllText("$env:TEMP\accelerator-ca.pem", $pem)
+
+# 2. Let Node trust it (the plugin and github_configure)
+setx NODE_EXTRA_CA_CERTS "%TEMP%\accelerator-ca.pem"
+
+# 3. Let git trust it (git owns a separate CA bundle)
+git config --global http.sslCAInfo "%TEMP%\accelerator-ca.pem"
+```
+
+Restart DSH after step 2 so the host process picks up the variable.
 
 ## License
 
