@@ -1,0 +1,57 @@
+{
+  "name": "dsh-github-sync",
+  "version": "0.2.0",
+  "description": "Publish a DSH workspace to a GitHub repository: create the repo, initialize git, commit, and push — with the token held in the DSH credential store.",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "scripts",
+    "test",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node test/verify.mjs"
+  },
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dataelement/dsh-desktop.git",
+    "directory": "packages/dsh-github-sync"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "github",
+    "git",
+    "sync"
+  ],
+  "engines": {
+    "node": ">=20.12"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.5-rc.2",
+    "@deepseek-ai/dsh-util-workspace-path": "^0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.2"
+  }
+}

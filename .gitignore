@@ -1,0 +1,11 @@
+# Dependencies are resolved from the DSH profile this plugin is installed into.
+node_modules/
+
+# Local install target written by scripts/install.mjs.
+.local-plugins/
+
+# DSH state that never belongs in a repository.
+.workbuddy/
+*.log
+.env
+.env.*

@@ -1,0 +1,9 @@
+# Normalize every text file to LF in the repository and in checkouts, so the
+# sources, the loader patch, and the test expectations are byte-identical on
+# every platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.webp binary
+*.ico binary

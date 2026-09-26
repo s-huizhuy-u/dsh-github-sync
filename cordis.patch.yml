@@ -1,0 +1,5 @@
+# Loader row for dsh-github-sync. The profile overlay inserts this package into
+# the plugin tree; the id is also the settings namespace and credential scope.
+- insert:
+    - id: dsh-github-sync
+      name: dsh-github-sync
